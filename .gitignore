@@ -25,3 +25,6 @@ dist-ssr
 
 # Test / coverage
 coverage
+
+# Desktop build output
+release/

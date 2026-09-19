@@ -8,6 +8,49 @@ Everything stays **on this computer** (browser storage). There is no account and
 
 ---
 
+## Get the app (no technical setup)
+
+There are three ways to use AideFlow. Pick whichever is easiest.
+
+### 1. Desktop app (Windows / Mac / Linux)
+
+1. Go to the **Releases** page of this repository on GitHub (right-hand side of the repo home page).
+2. Download the file for your computer:
+   - **Windows:** `AideFlow-Setup-x.y.z.exe` (installs like a normal program) or `AideFlow-Portable-x.y.z.exe` (runs without installing).
+   - **Mac:** `AideFlow-x.y.z-mac-arm64.dmg` (newer Macs with an Apple chip) or `AideFlow-x.y.z-mac-x64.dmg` (older Intel Macs).
+   - **Linux:** `AideFlow-x.y.z-linux.AppImage`.
+3. Open it. The app is not code-signed, so the first launch shows a warning:
+   - Windows: click **More info → Run anyway**.
+   - Mac: right-click the app → **Open** → **Open**.
+
+Your data stays inside the app on that computer.
+
+### 2. Web version (nothing to install)
+
+Every push to `main` publishes the app to GitHub Pages. Once Pages is enabled for the repo, the address is shown under **Settings → Pages**. Open it in Chrome, Edge or Safari. Your data stays in that browser.
+
+### 3. Run from source
+
+See "Run it" below. This needs Node.js installed.
+
+---
+
+## Building the desktop app yourself
+
+```bash
+npm install
+npm run desktop          # opens the desktop app on this computer
+npm run desktop:win      # makes Windows installers in release/
+npm run desktop:mac      # makes Mac .dmg files (must run on a Mac)
+npm run desktop:linux    # makes a Linux AppImage
+```
+
+To publish installers for everyone: create a tag like `v1.0.1` and push it, or open **Actions → Build desktop installers → Run workflow**. GitHub builds all three platforms and attaches them to a Release.
+
+To use your own app icon, replace `build/icon.png` with a square PNG at least 512×512 pixels.
+
+---
+
 ## Run it (one command after install)
 
 You need [Node.js](https://nodejs.org/) 20 or newer (the LTS installer is fine).
