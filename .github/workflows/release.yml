@@ -5,12 +5,12 @@ name: Build desktop installers
 #
 # Runs automatically when a tag like v1.0.0 is pushed, or start it by hand from
 # the Actions tab ("Run workflow"). It also builds (without publishing a
-# Release) on every pull request, so the installers can be downloaded from the
+# Release) on every branch push, so the installers can be downloaded from the
 # workflow run's "Artifacts" section.
 
 on:
-  pull_request:
   push:
+    branches-ignore: [main]
     tags: ['v*']
   workflow_dispatch:
     inputs:
