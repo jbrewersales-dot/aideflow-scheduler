@@ -4,9 +4,12 @@ name: Build desktop installers
 # installers to a GitHub Release so anyone can download them.
 #
 # Runs automatically when a tag like v1.0.0 is pushed, or start it by hand from
-# the Actions tab ("Run workflow").
+# the Actions tab ("Run workflow"). It also builds (without publishing a
+# Release) on every pull request, so the installers can be downloaded from the
+# workflow run's "Artifacts" section.
 
 on:
+  pull_request:
   push:
     tags: ['v*']
   workflow_dispatch:
@@ -53,6 +56,7 @@ jobs:
           if-no-files-found: error
 
   release:
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
     needs: build
     runs-on: ubuntu-latest
     steps:
