@@ -1,0 +1,4 @@
+name,dayType,blocks,busPickup,busDropoff,needTags,traits,needsNotes,requiresOneToOne,coverageMode,preferredAides
+Marcus Hale,full,,"07:40","14:25","behavior;1:1","aggressive;needs-1to1","Needs a consistent 1:1. Keep apart from Ethan.",true,always,"Denise Morales"
+Lily Chen,full,,"07:45","14:20","mobility;sensory","sensory-sensitive;wheelchair","Manual wheelchair. Headphones at recess.",false,always,"Keisha Ward"
+Jordan Blake,shortened,,"07:50","12:10","elopement;1:1","elopes;needs-1to1;flight-risk","Must have 1:1 from bus to bus.",true,always,"Priya Shah"
