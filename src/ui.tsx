@@ -21,15 +21,17 @@ export function Modal({
   title,
   children,
   onClose,
+  wide,
 }: {
   title: string;
   children: ReactNode;
   onClose: () => void;
+  wide?: boolean;
 }) {
   return (
     <div className="modal-back" role="presentation" onClick={onClose}>
       <div
-        className="modal"
+        className={wide ? 'modal modal-wide' : 'modal'}
         role="dialog"
         aria-modal="true"
         aria-label={title}

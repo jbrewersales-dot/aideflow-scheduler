@@ -12,14 +12,17 @@ import { createId } from './ids';
 import { evaluateData, solveSchedule } from './scheduler/solver';
 import { hardConflicts } from './scheduler/evaluate';
 import { loadStoredData, saveStoredData } from './storage';
+import { blankAideRecord, defaultLocations } from './data/defaults';
 import type {
   Aide,
   AppData,
   Assignment,
+  BackupPlan,
   Conflict,
   KeepApartPair,
   ScheduleBlock,
   SchedulerParams,
+  SchoolLocation,
   SolveResult,
   Student,
   TraitConflictRule,
@@ -35,6 +38,8 @@ export type AppView =
   | 'data'
   | 'strips'
   | 'conflicts'
+  | 'coverage'
+  | 'rooms'
   | 'print';
 
 type Action =
@@ -50,13 +55,21 @@ type Action =
   | { type: 'deleteKeepApart'; id: string }
   | { type: 'upsertTraitRule'; rule: TraitConflictRule }
   | { type: 'deleteTraitRule'; id: string }
+  | { type: 'upsertLocation'; location: SchoolLocation }
+  | { type: 'deleteLocation'; id: string }
+  | { type: 'setAbsent'; id: string; absent: boolean }
+  | { type: 'setBackupPlans'; plans: BackupPlan[] }
   | { type: 'setParams'; params: SchedulerParams }
   | { type: 'setSchedule'; assignments: Assignment[] | null; generatedAt?: string; score?: number; notes?: string[] }
   | { type: 'reassign'; assignment: Assignment };
 
+/**
+ * Any change to people, rooms or rules invalidates the current schedule and
+ * every backup plan, so a stale roster can never be printed as if it were new.
+ */
 function stripSchedule(data: AppData): AppData {
-  if (!data.schedule) return data;
-  return { ...data, schedule: null };
+  if (!data.schedule && data.backupPlans.length === 0) return data;
+  return { ...data, schedule: null, backupPlans: [] };
 }
 
 function reducer(state: AppData, action: Action): AppData {
@@ -77,6 +90,10 @@ function reducer(state: AppData, action: Action): AppData {
         ...state,
         students: state.students.filter((s) => s.id !== action.id),
         keepApart: state.keepApart.filter((p) => p.studentAId !== action.id && p.studentBId !== action.id),
+        blocks: state.blocks.map((b) => ({
+          ...b,
+          studentIds: b.studentIds.filter((id) => id !== action.id),
+        })),
         aides: state.aides.map((a) => ({
           ...a,
           preferredStudentIds: a.preferredStudentIds.filter((id) => id !== action.id),
@@ -137,6 +154,32 @@ function reducer(state: AppData, action: Action): AppData {
     }
     case 'deleteTraitRule':
       return stripSchedule({ ...state, traitConflicts: state.traitConflicts.filter((r) => r.id !== action.id) });
+    case 'upsertLocation': {
+      const exists = state.locations.some((l) => l.id === action.location.id);
+      const locations = exists
+        ? state.locations.map((l) => (l.id === action.location.id ? action.location : l))
+        : [...state.locations, action.location];
+      return stripSchedule({ ...state, locations });
+    }
+    case 'deleteLocation': {
+      if (state.locations.length <= 1) return state;
+      return stripSchedule({
+        ...state,
+        locations: state.locations.filter((l) => l.id !== action.id),
+        students: state.students.map((s) => ({
+          ...s,
+          plan: s.plan.map((p) => (p.locationId === action.id ? { ...p, locationId: '' } : p)),
+        })),
+        aides: state.aides.map((a) => (a.homeLocationId === action.id ? { ...a, homeLocationId: '' } : a)),
+      });
+    }
+    case 'setAbsent':
+      return stripSchedule({
+        ...state,
+        aides: state.aides.map((a) => (a.id === action.id ? { ...a, absent: action.absent } : a)),
+      });
+    case 'setBackupPlans':
+      return { ...state, backupPlans: action.plans };
     case 'setParams':
       return stripSchedule({ ...state, params: action.params });
     case 'setSchedule':
@@ -148,6 +191,7 @@ function reducer(state: AppData, action: Action): AppData {
           score: action.score ?? 0,
           generatedAt: action.generatedAt ?? new Date().toISOString(),
           notes: action.notes ?? [],
+          absentStaffIds: state.aides.filter((a) => a.absent).map((a) => a.id),
         },
       };
     case 'reassign': {
@@ -257,19 +301,20 @@ export function blankStudent(): Student {
     coverageMode: 'always',
     coverageBlockIds: [],
     requiresOneToOne: false,
+    plan: [],
   };
 }
 
 export function blankAide(): Aide {
-  return {
-    id: createId('aide'),
-    name: '',
-    availableBlockIds: [],
-    maxCaseload: 4,
-    trainedTags: [],
-    notes: '',
-    preferredStudentIds: [],
-  };
+  return blankAideRecord(createId('aide'), '');
+}
+
+export function blankLocation(): SchoolLocation {
+  return { id: createId('loc'), name: '', kind: 'general-ed', note: '' };
+}
+
+export function ensureLocations(data: AppData): SchoolLocation[] {
+  return data.locations.length > 0 ? data.locations : defaultLocations();
 }
 
 export function blankBlock(): ScheduleBlock {
@@ -280,5 +325,6 @@ export function blankBlock(): ScheduleBlock {
     endTime: '08:45',
     kind: 'period',
     appliesTo: 'all',
+    studentIds: [],
   };
 }

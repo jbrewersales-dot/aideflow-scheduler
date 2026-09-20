@@ -1,5 +1,14 @@
 import { useRef, useState } from 'react';
-import { parseStudentCsv, scheduleToCsv, studentsToCsv, STUDENT_CSV_TEMPLATE } from '../csv';
+import {
+  PLAN_CSV_TEMPLATE,
+  STUDENT_CSV_TEMPLATE,
+  parsePlanCsv,
+  parseStudentCsv,
+  planToCsv,
+  scheduleToCsv,
+  staffToCsv,
+  studentsToCsv,
+} from '../csv';
 import { resetDemo, resetEmpty, downloadText, exportJson, importJson } from '../storage';
 import { Banner } from '../ui';
 import { useStore } from '../state';
@@ -7,6 +16,7 @@ import { useStore } from '../state';
 export function DataView() {
   const { data, dispatch, scheduleLegal } = useStore();
   const fileRef = useRef<HTMLInputElement>(null);
+  const planRef = useRef<HTMLInputElement>(null);
   const jsonRef = useRef<HTMLInputElement>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -53,7 +63,10 @@ export function DataView() {
               setMessage(null);
               return;
             }
-            dispatch({ type: 'patch', data: { students: [...data.students, ...students], schedule: null } });
+            dispatch({
+              type: 'patch',
+              data: { students: [...data.students, ...students], schedule: null, backupPlans: [] },
+            });
             setMessage(`Added ${students.length} student(s).${errors.length ? ` Notes: ${errors.join(' ')}` : ''}`);
             setError(null);
           }}
@@ -69,7 +82,8 @@ export function DataView() {
             <strong>dayType</strong> — full or shortened
           </li>
           <li>
-            <strong>blocks</strong> — optional; semicolon-separated names. Blank = follow the day-type timeline
+            <strong>arrivalTime / departureTime</strong> — when they are in the building, e.g. 11:30 or 1:05 PM. This
+            beats the day type, so an afternoon-only student just needs an arrival time
           </li>
           <li>
             <strong>busPickup / busDropoff</strong> — times such as 07:45
@@ -81,7 +95,72 @@ export function DataView() {
             <strong>requiresOneToOne</strong> — true / false
           </li>
           <li>
-            <strong>preferredAides</strong> — aide names, semicolon-separated
+            <strong>preferredAides</strong> — staff names, semicolon-separated
+          </li>
+        </ul>
+      </div>
+
+      <div className="card">
+        <h2>Each student’s day (CSV)</h2>
+        <p className="lede">
+          The second upload: one row per student per block, saying what class they are in, which room, and whether an
+          adult goes with them. Upload the students first, then this.
+        </p>
+        <div className="row-actions">
+          <button
+            type="button"
+            className="btn"
+            onClick={() => downloadText('aideflow-day-plan-template.csv', PLAN_CSV_TEMPLATE, 'text/csv')}
+          >
+            Download day-plan template
+          </button>
+          <button type="button" className="btn btn-primary" onClick={() => planRef.current?.click()}>
+            Upload day plan
+          </button>
+          <button
+            type="button"
+            className="btn"
+            onClick={() => downloadText('aideflow-day-plan.csv', planToCsv(data), 'text/csv')}
+          >
+            Export current day plan
+          </button>
+        </div>
+        <input
+          ref={planRef}
+          type="file"
+          accept=".csv,text/csv"
+          hidden
+          onChange={async (e) => {
+            const file = e.target.files?.[0];
+            e.target.value = '';
+            if (!file) return;
+            const { students, applied, errors } = parsePlanCsv(await file.text(), data);
+            if (applied === 0) {
+              setError(errors.join(' ') || 'Nothing in that file matched a student and a block.');
+              setMessage(null);
+              return;
+            }
+            dispatch({ type: 'patch', data: { students, schedule: null, backupPlans: [] } });
+            setMessage(`Updated ${applied} block(s).${errors.length ? ` Notes: ${errors.join(' ')}` : ''}`);
+            setError(null);
+          }}
+        />
+        <h3 style={{ marginTop: 20 }}>Columns</h3>
+        <ul className="help-list">
+          <li>
+            <strong>student</strong> and <strong>block</strong> (required) — must match names you already have
+          </li>
+          <li>
+            <strong>activity</strong> — what to print on the schedule, e.g. “Gen-ed ELA”
+          </li>
+          <li>
+            <strong>location</strong> — a room name from the Rooms tab
+          </li>
+          <li>
+            <strong>attends / needsAide</strong> — yes or no. Leave blank to use the student’s normal pattern
+          </li>
+          <li>
+            <strong>aideAccompanies</strong> — yes when an adult must leave the room with them
           </li>
         </ul>
       </div>
@@ -105,6 +184,14 @@ export function DataView() {
             onClick={() => downloadText('aideflow-schedule.csv', scheduleToCsv(data), 'text/csv')}
           >
             Export schedule CSV
+          </button>
+          <button
+            type="button"
+            className="btn"
+            disabled={!data.schedule || !scheduleLegal}
+            onClick={() => downloadText('aideflow-staff-sheets.csv', staffToCsv(data), 'text/csv')}
+          >
+            Export staff sheets CSV
           </button>
         </div>
         <input

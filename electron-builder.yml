@@ -1,0 +1,33 @@
+appId: com.aideflow.scheduler
+productName: AideFlow
+directories:
+  output: release
+  buildResources: build
+files:
+  - dist/**
+  - electron/**
+  - package.json
+win:
+  target:
+    - nsis
+    - portable
+  # Skips the Windows-only resource editing step so installers can be built on any OS.
+  signAndEditExecutable: false
+nsis:
+  oneClick: true
+  perMachine: false
+  shortcutName: AideFlow
+  artifactName: AideFlow-Setup-${version}.${ext}
+portable:
+  artifactName: AideFlow-Portable-${version}.${ext}
+mac:
+  target:
+    - dmg
+    - zip
+  category: public.app-category.education
+  artifactName: AideFlow-${version}-mac-${arch}.${ext}
+linux:
+  target:
+    - AppImage
+  category: Education
+  artifactName: AideFlow-${version}-linux.${ext}
