@@ -1,38 +1,57 @@
-import type { Aide, AppData, KeepApartPair, Student } from '../types';
-import { defaultBlocks, defaultParams, defaultTraitConflicts } from './defaults';
+import type { Aide, AppData, KeepApartPair, Student, StudentBlockPlan } from '../types';
+import {
+  RESOURCE_ROOM_ID,
+  blankAideRecord,
+  defaultBlocks,
+  defaultLocations,
+  defaultParams,
+  defaultTeacher,
+  defaultTraitConflicts,
+} from './defaults';
+
+/** Shorthand for one row of a student's own day. */
+export function planRow(blockId: string, partial: Partial<StudentBlockPlan> = {}): StudentBlockPlan {
+  return {
+    blockId,
+    attends: null,
+    activity: '',
+    locationId: '',
+    needsAide: null,
+    aideAccompanies: false,
+    note: '',
+    ...partial,
+  };
+}
+
+export function blankPlanRow(blockId: string): StudentBlockPlan {
+  return planRow(blockId);
+}
 
 const aides: Aide[] = [
+  defaultTeacher(),
   {
-    id: 'aide_denise',
-    name: 'Denise Morales',
-    availableBlockIds: [],
+    ...blankAideRecord('aide_denise', 'Denise Morales'),
     maxCaseload: 4,
     trainedTags: ['aggressive', 'needs-1to1', 'elopes', 'behavior'],
     notes: 'Lead para. Strong with de-escalation and 1:1 behavior support.',
     preferredStudentIds: ['stu_marcus', 'stu_jordan'],
   },
   {
-    id: 'aide_keisha',
-    name: 'Keisha Ward',
-    availableBlockIds: [],
+    ...blankAideRecord('aide_keisha', 'Keisha Ward'),
     maxCaseload: 4,
     trainedTags: ['sensory-sensitive', 'wheelchair', 'medical', 'mobility'],
     notes: 'Trained in transfers and sensory regulation.',
     preferredStudentIds: ['stu_lily', 'stu_isla'],
   },
   {
-    id: 'aide_tom',
-    name: 'Tom Alvarez',
-    availableBlockIds: [],
+    ...blankAideRecord('aide_tom', 'Tom Alvarez'),
     maxCaseload: 4,
     trainedTags: ['nonverbal', 'medical', 'aac'],
     notes: 'Comfortable with AAC and medical notes. Prefers smaller groups after lunch.',
     preferredStudentIds: ['stu_ava'],
   },
   {
-    id: 'aide_priya',
-    name: 'Priya Shah',
-    availableBlockIds: [],
+    ...blankAideRecord('aide_priya', 'Priya Shah'),
     maxCaseload: 3,
     trainedTags: ['elopes', 'needs-1to1', 'flight-risk'],
     notes: 'New this year. Excellent proximity control for flight-risk students.',
@@ -55,6 +74,7 @@ const students: Student[] = [
     coverageMode: 'always',
     coverageBlockIds: [],
     requiresOneToOne: true,
+    plan: [planRow('blk_p1', { activity: 'ELA with Mrs. Brewer' })],
   },
   {
     id: 'stu_lily',
@@ -70,6 +90,14 @@ const students: Student[] = [
     coverageMode: 'always',
     coverageBlockIds: [],
     requiresOneToOne: false,
+    plan: [
+      planRow('blk_p1', {
+        activity: 'Gen-ed ELA (inclusion)',
+        locationId: 'loc_gened_a',
+        aideAccompanies: true,
+        note: 'Aide pushes in with her for the whole period.',
+      }),
+    ],
   },
   {
     id: 'stu_jordan',
@@ -78,6 +106,7 @@ const students: Student[] = [
     blockIds: [],
     busPickup: '07:50',
     busDropoff: '12:10',
+    departureTime: '12:15',
     needsNotes: 'Elopes at transitions. Must have 1:1 from bus to bus. Shortened day.',
     needTags: ['elopement', '1:1'],
     traits: ['elopes', 'needs-1to1', 'flight-risk'],
@@ -85,6 +114,7 @@ const students: Student[] = [
     coverageMode: 'always',
     coverageBlockIds: [],
     requiresOneToOne: true,
+    plan: [],
   },
   {
     id: 'stu_ava',
@@ -98,6 +128,14 @@ const students: Student[] = [
     coverageMode: 'always',
     coverageBlockIds: [],
     requiresOneToOne: false,
+    plan: [
+      planRow('blk_p5', {
+        activity: 'Speech therapy (pull-out)',
+        locationId: 'loc_therapy',
+        aideAccompanies: true,
+        note: 'Walks down with an aide; aide waits and walks her back.',
+      }),
+    ],
   },
   {
     id: 'stu_ethan',
@@ -113,6 +151,7 @@ const students: Student[] = [
     coverageMode: 'always',
     coverageBlockIds: [],
     requiresOneToOne: false,
+    plan: [],
   },
   {
     id: 'stu_sofia',
@@ -121,6 +160,7 @@ const students: Student[] = [
     blockIds: [],
     busPickup: '07:48',
     busDropoff: '12:10',
+    departureTime: '12:15',
     needsNotes: 'Sensory-sensitive; darkened corner helps. Shortened day after lunch bus.',
     needTags: ['sensory'],
     traits: ['sensory-sensitive'],
@@ -128,6 +168,7 @@ const students: Student[] = [
     coverageMode: 'always',
     coverageBlockIds: [],
     requiresOneToOne: false,
+    plan: [],
   },
   {
     id: 'stu_caleb',
@@ -141,19 +182,28 @@ const students: Student[] = [
     coverageMode: 'always',
     coverageBlockIds: [],
     requiresOneToOne: false,
+    plan: [],
   },
   {
     id: 'stu_maya',
     name: 'Maya Thompson',
     dayType: 'full',
     blockIds: [],
-    needsNotes: 'Resource support for reading. Flexible grouping is fine.',
+    needsNotes: 'Resource support for reading. Independent at specials.',
     needTags: ['academic'],
     traits: [],
     preferredAideIds: [],
     coverageMode: 'always',
     coverageBlockIds: [],
     requiresOneToOne: false,
+    plan: [
+      planRow('blk_specials', {
+        activity: 'Art (independent)',
+        locationId: 'loc_specials',
+        needsAide: false,
+        note: 'Does not need an adult for specials.',
+      }),
+    ],
   },
   {
     id: 'stu_noah',
@@ -162,6 +212,7 @@ const students: Student[] = [
     blockIds: [],
     busPickup: '07:50',
     busDropoff: '12:10',
+    departureTime: '12:15',
     needsNotes: 'Curious wanderer at dismissal. Prefers Priya nearby. Shortened day.',
     needTags: ['proximity'],
     traits: [],
@@ -169,6 +220,7 @@ const students: Student[] = [
     coverageMode: 'always',
     coverageBlockIds: [],
     requiresOneToOne: false,
+    plan: [],
   },
   {
     id: 'stu_isla',
@@ -184,6 +236,24 @@ const students: Student[] = [
     coverageMode: 'always',
     coverageBlockIds: [],
     requiresOneToOne: false,
+    plan: [],
+  },
+  {
+    id: 'stu_dylan',
+    name: 'Dylan Reyes',
+    dayType: 'full',
+    blockIds: [],
+    arrivalTime: '11:30',
+    busPickup: '11:25',
+    busDropoff: '14:25',
+    needsNotes: 'Afternoon-only placement. Arrives on the midday van in time for lunch.',
+    needTags: ['behavior'],
+    traits: [],
+    preferredAideIds: ['aide_denise'],
+    coverageMode: 'always',
+    coverageBlockIds: [],
+    requiresOneToOne: false,
+    plan: [],
   },
 ];
 
@@ -204,35 +274,42 @@ const keepApart: KeepApartPair[] = [
 
 export function createDemoData(): AppData {
   return {
-    version: 1,
+    version: 2,
     teacherName: 'Ashley Brewer',
     schoolName: 'Resource / Special Education',
     students,
     aides,
     blocks: defaultBlocks(),
+    locations: defaultLocations(),
     keepApart,
     traitConflicts: defaultTraitConflicts(),
     params: defaultParams(),
     schedule: null,
+    backupPlans: [],
   };
 }
 
 export function emptyData(): AppData {
   return {
-    version: 1,
+    version: 2,
     teacherName: 'Ashley Brewer',
     schoolName: '',
     students: [],
     aides: [
-      { id: 'aide_1', name: 'Aide 1', availableBlockIds: [], maxCaseload: 4, trainedTags: [], notes: '', preferredStudentIds: [] },
-      { id: 'aide_2', name: 'Aide 2', availableBlockIds: [], maxCaseload: 4, trainedTags: [], notes: '', preferredStudentIds: [] },
-      { id: 'aide_3', name: 'Aide 3', availableBlockIds: [], maxCaseload: 4, trainedTags: [], notes: '', preferredStudentIds: [] },
-      { id: 'aide_4', name: 'Aide 4', availableBlockIds: [], maxCaseload: 4, trainedTags: [], notes: '', preferredStudentIds: [] },
+      defaultTeacher(),
+      blankAideRecord('aide_1', 'Aide 1'),
+      blankAideRecord('aide_2', 'Aide 2'),
+      blankAideRecord('aide_3', 'Aide 3'),
+      blankAideRecord('aide_4', 'Aide 4'),
     ],
     blocks: defaultBlocks(),
+    locations: defaultLocations(),
     keepApart: [],
     traitConflicts: defaultTraitConflicts(),
     params: defaultParams(),
     schedule: null,
+    backupPlans: [],
   };
 }
+
+export { RESOURCE_ROOM_ID };

@@ -1,25 +1,41 @@
 import {
   aideAvailableForBlock,
   blocksOverlap,
+  isTeacher,
+  locationName,
   sortBlocks,
   studentAttendsBlock,
   studentNeedsCoverage,
   studentRequiresOneToOne,
 } from '../domain';
 import type { Aide, AppData, Assignment, Conflict, ScheduleBlock, SolveResult, Student } from '../types';
-import { effectiveCap, evaluateAssignments, hardConflicts, makeContext, wouldViolateHard, type EvalContext } from './evaluate';
+import {
+  assignableStaff,
+  effectiveCap,
+  evaluateAssignments,
+  hardConflicts,
+  locationOf,
+  makeContext,
+  wouldViolateHard,
+  type EvalContext,
+} from './evaluate';
 import { scoreAssignments } from './score';
 
-const NODE_BUDGET = 250_000;
+/**
+ * Nodes we are willing to explore while *proving* a part of the day impossible.
+ * Only reaching this without any legal arrangement is reported as "too complex".
+ */
+const NODE_BUDGET = 3_000_000;
+/** Extra nodes spent looking for a nicer schedule after the first legal one. */
+const IMPROVE_BUDGET = 12_000;
 
-interface BlockSolve {
-  assignments: Assignment[];
-  score: number;
-  nodes: number;
+export interface SolveOptions {
+  /** Staff treated as out for this run, on top of each staff member's own flag. */
+  absentStaffIds?: string[];
 }
 
-function availableAides(ctx: EvalContext, block: ScheduleBlock, busyAideIds: Set<string>): Aide[] {
-  return ctx.aides.filter((a) => aideAvailableForBlock(a, block.id) && !busyAideIds.has(a.id));
+function availableAides(ctx: EvalContext, block: ScheduleBlock): Aide[] {
+  return assignableStaff(ctx).filter((a) => aideAvailableForBlock(a, block.id));
 }
 
 function presentStudents(ctx: EvalContext, block: ScheduleBlock): Student[] {
@@ -42,10 +58,14 @@ function sortStudentsForSearch(ctx: EvalContext, students: Student[]): Student[]
   });
 }
 
-function preflightBlock(ctx: EvalContext, block: ScheduleBlock, busyAideIds: Set<string>): Conflict[] {
+/**
+ * Cheap structural checks that prove a block is impossible before searching it.
+ * Every message names the block and the students involved in plain language.
+ */
+function preflightBlock(ctx: EvalContext, block: ScheduleBlock): Conflict[] {
   const reasons: Conflict[] = [];
   const needed = requiredStudents(ctx, block);
-  const aides = availableAides(ctx, block, busyAideIds);
+  const aides = availableAides(ctx, block);
 
   if (needed.length === 0) return reasons;
 
@@ -55,7 +75,7 @@ function preflightBlock(ctx: EvalContext, block: ScheduleBlock, busyAideIds: Set
       severity: 'hard',
       blockId: block.id,
       studentIds: needed.map((s) => s.id),
-      message: `No aides are available during ${block.name}, but ${needed.length} student(s) need coverage.`,
+      message: `No staff are available during ${block.name}, but ${needed.length} student(s) need an adult.`,
     });
     return reasons;
   }
@@ -67,225 +87,434 @@ function preflightBlock(ctx: EvalContext, block: ScheduleBlock, busyAideIds: Set
       severity: 'hard',
       blockId: block.id,
       studentIds: oneToOne.map((s) => s.id),
-      message: `${block.name} has ${oneToOne.length} students who require 1:1 but only ${aides.length} available aide(s).`,
+      message: `${block.name} has ${oneToOne.length} students who require 1:1 but only ${aides.length} available staff member(s).`,
     });
   }
 
-  const capacity = aides.reduce((sum, a) => sum + effectiveCap(a, ctx.params), 0);
+  // One adult can only be in one room, so every distinct room needs its own adult.
+  const byLocation = new Map<string, Student[]>();
+  for (const s of needed) {
+    const loc = locationOf(ctx, s, block.id);
+    const list = byLocation.get(loc) ?? [];
+    list.push(s);
+    byLocation.set(loc, list);
+  }
+  if (byLocation.size > aides.length) {
+    reasons.push({
+      kind: 'location-split',
+      severity: 'hard',
+      blockId: block.id,
+      studentIds: needed.map((s) => s.id),
+      message: `During ${block.name} students need adults in ${byLocation.size} different places (${[...byLocation.keys()].map((id) => locationName(ctx.locations, id)).join(', ')}) but only ${aides.length} staff member(s) are available.`,
+    });
+  }
+
+  // Staff who cannot leave their room cannot serve students elsewhere.
+  for (const [loc, group] of byLocation) {
+    const canCover = aides.filter(
+      (a) => a.canLeaveRoom || !a.homeLocationId || a.homeLocationId === loc,
+    );
+    if (canCover.length === 0) {
+      reasons.push({
+        kind: 'cannot-leave-room',
+        severity: 'hard',
+        blockId: block.id,
+        studentIds: group.map((s) => s.id),
+        message: `No available staff member can go to ${locationName(ctx.locations, loc)} during ${block.name} for ${group.map((s) => s.name).join(', ')}.`,
+      });
+    }
+    const seatsThere = canCover.reduce((sum, a) => sum + effectiveCap(a, ctx.params), 0);
+    if (group.length > seatsThere && canCover.length > 0) {
+      reasons.push({
+        kind: 'over-caseload',
+        severity: 'hard',
+        blockId: block.id,
+        studentIds: group.map((s) => s.id),
+        message: `${locationName(ctx.locations, loc)} during ${block.name} needs ${group.length} seats but reachable staff only provide ${seatsThere}.`,
+      });
+    }
+  }
+
+  const caps = aides.map((a) => effectiveCap(a, ctx.params)).sort((x, y) => x - y);
+  const capacity = caps.reduce((sum, n) => sum + n, 0);
   if (needed.length > capacity) {
     reasons.push({
       kind: 'over-caseload',
       severity: 'hard',
       blockId: block.id,
       studentIds: needed.map((s) => s.id),
-      message: `${block.name} needs coverage for ${needed.length} students but aides only have ${capacity} total seats (max per aide / group size).`,
+      message: `${block.name} needs coverage for ${needed.length} students but staff only have ${capacity} total seats (max per adult / group size).`,
     });
   }
 
-  const remainingSeats = capacity - oneToOne.length;
-  const remainingStudents = needed.length - oneToOne.length;
-  if (remainingStudents > remainingSeats && oneToOne.length <= aides.length) {
-    reasons.push({
-      kind: 'over-caseload',
-      severity: 'hard',
-      blockId: block.id,
-      studentIds: needed.filter((s) => !oneToOne.includes(s)).map((s) => s.id),
-      message: `After placing ${oneToOne.length} 1:1 student(s) in ${block.name}, only ${remainingSeats} seat(s) remain for ${remainingStudents} other student(s).`,
-    });
+  // A 1:1 student takes up a whole adult, not one seat. The best case is that
+  // the adults with the smallest groups take the 1:1 students, so the seats
+  // left over are the largest remaining caps.
+  const oneToOneCount = oneToOne.length;
+  if (oneToOneCount > 0 && oneToOneCount <= aides.length) {
+    const remainingSeats = caps.slice(oneToOneCount).reduce((sum, n) => sum + n, 0);
+    const remainingStudents = needed.length - oneToOneCount;
+    if (remainingStudents > remainingSeats) {
+      reasons.push({
+        kind: 'over-caseload',
+        severity: 'hard',
+        blockId: block.id,
+        studentIds: needed.filter((s) => !oneToOne.includes(s)).map((s) => s.id),
+        message: `In ${block.name}, ${oneToOneCount} student(s) need 1:1, which uses up ${oneToOneCount} adult(s) entirely. That leaves ${remainingSeats} seat(s) for the other ${remainingStudents} student(s).`,
+      });
+    }
   }
 
   return reasons;
 }
 
-function explainUnplaceable(
-  ctx: EvalContext,
-  block: ScheduleBlock,
-  students: Student[],
-  aides: Aide[],
-): Conflict[] {
+function explainUnplaceable(ctx: EvalContext, blocks: ScheduleBlock[]): Conflict[] {
   const reasons: Conflict[] = [];
-  const pre = preflightBlock(ctx, block, new Set(ctx.aides.filter((a) => !aides.some((x) => x.id === a.id)).map((a) => a.id)));
-  reasons.push(...pre);
+  for (const block of blocks) {
+    reasons.push(...preflightBlock(ctx, block));
+  }
 
-  // For each pair of keep-apart students, check they have at least two distinct legal aides
-  for (const pair of ctx.keepApart) {
-    const a = students.find((s) => s.id === pair.studentAId);
-    const b = students.find((s) => s.id === pair.studentBId);
-    if (!a || !b) continue;
-    reasons.push({
-      kind: 'keep-apart',
-      severity: 'hard',
-      blockId: block.id,
-      studentIds: [a.id, b.id],
-      ruleId: pair.id,
-      message: `${a.name} and ${b.name} must stay apart during ${block.name}${pair.reason ? ` — ${pair.reason}` : ''}. If they cannot be placed on different aides, no valid schedule exists.`,
-    });
+  if (reasons.length === 0) {
+    // Name the keep-apart and trait pressure that the exhaustive search hit.
+    for (const block of blocks) {
+      const needed = requiredStudents(ctx, block);
+      const ids = new Set(needed.map((s) => s.id));
+      for (const pair of ctx.keepApart) {
+        if (!ids.has(pair.studentAId) || !ids.has(pair.studentBId)) continue;
+        const a = ctx.studentById.get(pair.studentAId);
+        const b = ctx.studentById.get(pair.studentBId);
+        reasons.push({
+          kind: 'keep-apart',
+          severity: 'hard',
+          blockId: block.id,
+          studentIds: [pair.studentAId, pair.studentBId],
+          ruleId: pair.id,
+          message: `${a?.name ?? 'A student'} and ${b?.name ?? 'another student'} must stay apart during ${block.name}${pair.reason ? ` — ${pair.reason}` : ''}, and no legal split was found.`,
+        });
+      }
+    }
   }
 
   if (reasons.length === 0) {
     reasons.push({
       kind: 'over-caseload',
       severity: 'hard',
-      blockId: block.id,
-      studentIds: students.map((s) => s.id),
-      message: `Explored every legal assignment for ${block.name} and none satisfied all hard rules (keep-apart, trait conflicts, 1:1, caseload, and aide availability).`,
+      blockId: blocks[0]?.id,
+      studentIds: blocks.flatMap((b) => requiredStudents(ctx, b).map((s) => s.id)),
+      message: `Explored every legal combination for ${blocks.map((b) => b.name).join(', ')} and none satisfied all hard rules (keep-apart, trait conflicts, 1:1, room limits, caseload, and staff availability).`,
     });
   }
 
   return reasons;
 }
 
-function solveBlock(
-  ctx: EvalContext,
-  block: ScheduleBlock,
-  busyAideIds: Set<string>,
-  previousAideByStudent: Map<string, string>,
-): BlockSolve | { fail: true; reasons: Conflict[]; nodes: number } {
-  const required = requiredStudents(ctx, block);
-  const optional = presentStudents(ctx, block).filter((s) => !required.some((r) => r.id === s.id));
-  const aides = availableAides(ctx, block, busyAideIds);
+interface ComponentSolve {
+  assignments: Assignment[];
+  score: number;
+  nodes: number;
+}
 
-  const structural = preflightBlock(ctx, block, busyAideIds);
-  if (structural.length > 0) {
-    return { fail: true, reasons: structural, nodes: 0 };
+interface ComponentFail {
+  fail: true;
+  reasons: Conflict[];
+  nodes: number;
+}
+
+interface Slot {
+  block: ScheduleBlock;
+  student: Student;
+  optional: boolean;
+}
+
+/**
+ * Solve a group of blocks that overlap each other (usually a single block).
+ * Overlapping blocks are searched together so an early choice can never make a
+ * later block unsolvable without the search backtracking into it.
+ */
+function solveComponent(
+  ctx: EvalContext,
+  blocks: ScheduleBlock[],
+  previousAideByStudent: Map<string, string>,
+): ComponentSolve | ComponentFail {
+  for (const block of blocks) {
+    const structural = preflightBlock(ctx, block);
+    if (structural.length > 0) {
+      return { fail: true, reasons: structural, nodes: 0 };
+    }
   }
 
-  const mustPlace = sortStudentsForSearch(ctx, required);
-  let nodes = 0;
-  let best: Map<string, string> | null = null;
-  let bestScore = -Infinity;
+  const ordered = sortBlocks(blocks);
+  const requiredSlots: Slot[] = [];
+  const optionalSlots: Slot[] = [];
+  for (const block of ordered) {
+    const required = requiredStudents(ctx, block);
+    const requiredIds = new Set(required.map((s) => s.id));
+    for (const student of sortStudentsForSearch(ctx, required)) {
+      requiredSlots.push({ block, student, optional: false });
+    }
+    const optional = presentStudents(ctx, block).filter((s) => !requiredIds.has(s.id));
+    for (const student of sortStudentsForSearch(ctx, optional)) {
+      optionalSlots.push({ block, student, optional: true });
+    }
+  }
 
-  const tryAssign = (queue: Student[], assigned: Map<string, string>, placingOptional: boolean): void => {
-    if (nodes > NODE_BUDGET) return;
-    if (queue.length === 0) {
-      const score = scorePartial(ctx, block, assigned, previousAideByStudent);
-      if (!best || score > bestScore) {
-        best = new Map(assigned);
-        bestScore = score;
+  const aidesByBlock = new Map<string, Aide[]>();
+  for (const block of ordered) aidesByBlock.set(block.id, availableAides(ctx, block));
+
+  const overlapIds = new Map<string, string[]>();
+  for (const a of ordered) {
+    overlapIds.set(
+      a.id,
+      ordered.filter((b) => blocksOverlap(a, b)).map((b) => b.id),
+    );
+  }
+
+  const assignedByBlock = new Map<string, Map<string, string>>();
+  for (const block of ordered) assignedByBlock.set(block.id, new Map());
+  const staffBlocks = new Map<string, Set<string>>();
+
+  let nodes = 0;
+  let exhausted = false;
+  let best: Assignment[] | null = null;
+  let bestScore = -Infinity;
+  /** Node count when the first legal arrangement was found. */
+  let firstSolutionAt = -1;
+
+  const snapshot = (): Assignment[] => {
+    const out: Assignment[] = [];
+    for (const [blockId, map] of assignedByBlock) {
+      for (const [studentId, aideId] of map) out.push({ studentId, aideId, blockId });
+    }
+    return out;
+  };
+
+  const place = (slot: Slot, aide: Aide): boolean => {
+    const busy = staffBlocks.get(aide.id);
+    if (busy) {
+      for (const other of overlapIds.get(slot.block.id) ?? []) {
+        if (busy.has(other)) return false;
       }
+    }
+    const map = assignedByBlock.get(slot.block.id);
+    if (!map) return false;
+    if (wouldViolateHard(ctx, slot.block, slot.student, aide, map)) return false;
+    map.set(slot.student.id, aide.id);
+    const set = staffBlocks.get(aide.id) ?? new Set<string>();
+    set.add(slot.block.id);
+    staffBlocks.set(aide.id, set);
+    return true;
+  };
+
+  const unplace = (slot: Slot, aide: Aide): void => {
+    const map = assignedByBlock.get(slot.block.id);
+    map?.delete(slot.student.id);
+    const stillHere = [...(map?.values() ?? [])].includes(aide.id);
+    if (!stillHere) staffBlocks.get(aide.id)?.delete(slot.block.id);
+  };
+
+  const orderAides = (slot: Slot): Aide[] => {
+    const list = aidesByBlock.get(slot.block.id) ?? [];
+    const prev = previousAideByStudent.get(slot.student.id);
+    return [...list].sort((a, b) => {
+      const rank = (x: Aide): number => {
+        if (x.id === prev) return 0;
+        if (slot.student.preferredAideIds.includes(x.id)) return 1;
+        if (x.preferredStudentIds.includes(slot.student.id)) return 2;
+        return 3;
+      };
+      const ra = rank(a);
+      const rb = rank(b);
+      if (ra !== rb) return ra - rb;
+      return a.name.localeCompare(b.name);
+    });
+  };
+
+  /**
+   * True once we should stop. Before any legal arrangement is found we keep
+   * going to the full budget, so "no valid schedule" always means the search
+   * really did run out of possibilities rather than out of patience.
+   */
+  const outOfBudget = (): boolean => {
+    if (nodes > NODE_BUDGET) {
+      exhausted = true;
+      return true;
+    }
+    if (firstSolutionAt >= 0 && nodes - firstSolutionAt > IMPROVE_BUDGET) return true;
+    return false;
+  };
+
+  const search = (slots: Slot[], index: number): void => {
+    if (outOfBudget()) return;
+    if (index >= slots.length) {
+      const assignments = snapshot();
+      const score = scorePartial(ctx, assignments, previousAideByStudent);
+      if (score > bestScore) {
+        bestScore = score;
+        best = assignments;
+      }
+      if (firstSolutionAt < 0) firstSolutionAt = nodes;
       return;
     }
 
-    const student = queue[0];
-    const rest = queue.slice(1);
-    const orderedAides = [...aides].sort((a, b) => {
-      const prev = previousAideByStudent.get(student.id);
-      const ap = a.id === prev || student.preferredAideIds.includes(a.id) || a.preferredStudentIds.includes(student.id) ? 0 : 1;
-      const bp = b.id === prev || student.preferredAideIds.includes(b.id) || b.preferredStudentIds.includes(student.id) ? 0 : 1;
-      if (ap !== bp) return ap - bp;
-      return a.name.localeCompare(b.name);
-    });
-
-    let placed = false;
-    for (const aide of orderedAides) {
+    const slot = slots[index];
+    let placedAny = false;
+    for (const aide of orderAides(slot)) {
       nodes += 1;
-      if (nodes > NODE_BUDGET) break;
-      if (wouldViolateHard(ctx, block, student, aide, assigned)) continue;
-      assigned.set(student.id, aide.id);
-      tryAssign(rest, assigned, placingOptional);
-      assigned.delete(student.id);
-      placed = true;
+      if (outOfBudget()) return;
+      if (!place(slot, aide)) continue;
+      placedAny = true;
+      search(slots, index + 1);
+      unplace(slot, aide);
     }
 
-    if (placingOptional && !placed) {
-      // Optional students may remain unassigned.
-      tryAssign(rest, assigned, true);
+    if (slot.optional && !placedAny) {
+      search(slots, index + 1);
     }
   };
 
-  tryAssign(mustPlace, new Map<string, string>(), false);
+  search(requiredSlots, 0);
 
-  const requiredBest = best;
-  if (!requiredBest) {
+  if (!best) {
     return {
       fail: true,
-      reasons: explainUnplaceable(ctx, block, mustPlace, aides),
+      reasons: exhausted
+        ? [
+            {
+              kind: 'over-caseload',
+              severity: 'hard',
+              blockId: ordered[0]?.id,
+              studentIds: requiredSlots.map((s) => s.student.id),
+              message: `The search for ${ordered.map((b) => b.name).join(', ')} hit its size limit before finding a legal arrangement. Simplify the rules for this part of the day and try again.`,
+            },
+          ]
+        : explainUnplaceable(ctx, ordered),
       nodes,
     };
   }
 
-  let chosen: Map<string, string> = new Map(requiredBest);
-
-  // Best-effort optional students
-  if (optional.length > 0 && nodes < NODE_BUDGET) {
-    const start = new Map<string, string>(requiredBest);
-    const withOptional = new Map<string, string>(requiredBest);
-    let optScore = bestScore;
-    const fill = (queue: Student[], assigned: Map<string, string>): void => {
-      if (nodes > NODE_BUDGET) return;
-      if (queue.length === 0) {
-        const score = scorePartial(ctx, block, assigned, previousAideByStudent);
-        if (score > optScore) {
-          optScore = score;
-          withOptional.clear();
-          for (const [k, v] of assigned) withOptional.set(k, v);
-        }
-        return;
-      }
-      const student = queue[0];
-      const rest = queue.slice(1);
-      let any = false;
-      for (const aide of aides) {
-        nodes += 1;
-        if (wouldViolateHard(ctx, block, student, aide, assigned)) continue;
-        assigned.set(student.id, aide.id);
-        fill(rest, assigned);
-        assigned.delete(student.id);
-        any = true;
-      }
-      if (!any) fill(rest, assigned);
-    };
-    fill(sortStudentsForSearch(ctx, optional), start);
-    chosen = withOptional;
-    bestScore = optScore;
+  // Lock in the best required-only solution, then fill optional students around it.
+  const lockedIn: Assignment[] = best;
+  for (const map of assignedByBlock.values()) map.clear();
+  staffBlocks.clear();
+  for (const a of lockedIn) {
+    assignedByBlock.get(a.blockId)?.set(a.studentId, a.aideId);
+    const set = staffBlocks.get(a.aideId) ?? new Set<string>();
+    set.add(a.blockId);
+    staffBlocks.set(a.aideId, set);
   }
 
-  const assignments: Assignment[] = [...chosen].map(([studentId, aideId]) => ({
-    studentId,
-    aideId,
-    blockId: block.id,
-  }));
+  if (optionalSlots.length > 0 && !exhausted) {
+    bestScore = scorePartial(ctx, snapshot(), previousAideByStudent);
+    best = snapshot();
+    firstSolutionAt = nodes;
+    search(optionalSlots, 0);
+  }
 
-  return { assignments, score: bestScore, nodes };
+  return { assignments: best ?? lockedIn, score: bestScore, nodes };
 }
 
+/**
+ * Cheap preference score for one component, used to choose between legal
+ * arrangements. It runs at every leaf of the search, so it only looks at the
+ * assignments in hand — the full-day score is computed once at the end.
+ */
 function scorePartial(
   ctx: EvalContext,
-  block: ScheduleBlock,
-  assigned: Map<string, string>,
+  assignments: Assignment[],
   previousAideByStudent: Map<string, string>,
 ): number {
-  const fake: Assignment[] = [...assigned].map(([studentId, aideId]) => ({
-    studentId,
-    aideId,
-    blockId: block.id,
-  }));
-  const { score } = scoreAssignments(ctx, fake);
-  let extra = 0;
-  for (const [sid, aid] of assigned) {
-    if (previousAideByStudent.get(sid) === aid) extra += ctx.params.weights.minimizeTransitions;
+  const w = ctx.params.weights;
+  let score = 0;
+  const groupSizes = new Map<string, number>();
+
+  for (const a of assignments) {
+    const student = ctx.studentById.get(a.studentId);
+    const aide = ctx.aideById.get(a.aideId);
+    if (!student || !aide) continue;
+
+    if (student.preferredAideIds.includes(aide.id) || aide.preferredStudentIds.includes(student.id)) {
+      score += w.preferredMatch;
+    }
+    const tags = new Set([...student.needTags, ...student.traits]);
+    for (const t of aide.trainedTags) {
+      if (tags.has(t)) {
+        score += w.trainedTagMatch;
+        break;
+      }
+    }
+    if (previousAideByStudent.get(a.studentId) === a.aideId) score += w.minimizeTransitions;
+    if (isTeacher(aide) && locationOf(ctx, student, a.blockId) === aide.homeLocationId) {
+      score += w.keepWithTeacher;
+    }
+    // Covering a student at all beats leaving an optional one out.
+    score += 1;
+
+    const key = `${a.blockId}::${a.aideId}`;
+    groupSizes.set(key, (groupSizes.get(key) ?? 0) + 1);
   }
-  return score + extra;
+
+  const sizes = [...groupSizes.values()];
+  if (sizes.length > 1) {
+    const mean = sizes.reduce((s, n) => s + n, 0) / sizes.length;
+    const variance = sizes.reduce((s, n) => s + (n - mean) ** 2, 0) / sizes.length;
+    score -= variance * w.caseloadBalance;
+  }
+
+  return score;
+}
+
+/** Blocks that overlap each other must be solved together. */
+function overlapComponents(blocks: ScheduleBlock[]): ScheduleBlock[][] {
+  const ordered = sortBlocks(blocks);
+  const seen = new Set<string>();
+  const components: ScheduleBlock[][] = [];
+
+  for (const start of ordered) {
+    if (seen.has(start.id)) continue;
+    const queue = [start];
+    const group: ScheduleBlock[] = [];
+    seen.add(start.id);
+    while (queue.length > 0) {
+      const current = queue.pop();
+      if (!current) break;
+      group.push(current);
+      for (const other of ordered) {
+        if (seen.has(other.id)) continue;
+        if (blocksOverlap(current, other)) {
+          seen.add(other.id);
+          queue.push(other);
+        }
+      }
+    }
+    components.push(sortBlocks(group));
+  }
+
+  return components;
 }
 
 /**
  * Search for a complete assignment that violates zero hard constraints.
  * If none exists, return reasons — never a partial or illegal schedule.
  */
-export function solveSchedule(data: AppData): SolveResult {
-  const ctx = makeContext(data);
+export function solveSchedule(data: AppData, options: SolveOptions = {}): SolveResult {
+  const absentStaffIds = options.absentStaffIds ?? [];
+  const ctx = makeContext(data, absentStaffIds);
   let searchedNodes = 0;
 
-  if (ctx.aides.length === 0) {
+  const staff = assignableStaff(ctx);
+  if (staff.length === 0) {
+    const anyStaff = ctx.aides.length > 0;
     return {
       ok: false,
       searchedNodes: 0,
       reasons: [
         {
-          kind: 'aide-unavailable',
+          kind: anyStaff ? 'staff-absent' : 'aide-unavailable',
           severity: 'hard',
           studentIds: ctx.students.map((s) => s.id),
-          message: 'There are no aides to assign. Add at least one aide and try again.',
+          message: anyStaff
+            ? 'Everyone who can cover students is marked out today. Bring someone back in, or add a substitute on the Staff tab.'
+            : 'There are no staff to assign. Add at least one aide and try again.',
         },
       ],
     };
@@ -306,30 +535,21 @@ export function solveSchedule(data: AppData): SolveResult {
     };
   }
 
-  const blocks = sortBlocks(ctx.blocks);
   const allAssignments: Assignment[] = [];
   const previousAideByStudent = new Map<string, string>();
-  const usedAideBlocks: { aideId: string; block: ScheduleBlock }[] = [];
 
-  for (const block of blocks) {
-    const busy = new Set<string>();
-    for (const used of usedAideBlocks) {
-      if (blocksOverlap(used.block, block)) busy.add(used.aideId);
-    }
+  for (const component of overlapComponents(ctx.blocks)) {
+    const result = solveComponent(ctx, component, previousAideByStudent);
+    searchedNodes += result.nodes;
 
-    const result = solveBlock(ctx, block, busy, previousAideByStudent);
-    searchedNodes += 'nodes' in result ? result.nodes : 0;
-
-    if ('fail' in result && result.fail) {
+    if ('fail' in result) {
       return { ok: false, reasons: result.reasons, searchedNodes };
     }
 
-    const solved = result as BlockSolve;
-    allAssignments.push(...solved.assignments);
+    allAssignments.push(...result.assignments);
     previousAideByStudent.clear();
-    for (const a of solved.assignments) {
+    for (const a of result.assignments) {
       previousAideByStudent.set(a.studentId, a.aideId);
-      usedAideBlocks.push({ aideId: a.aideId, block });
     }
   }
 
@@ -340,6 +560,11 @@ export function solveSchedule(data: AppData): SolveResult {
   }
 
   const { score, notes } = scoreAssignments(ctx, allAssignments);
+  const absentNames = ctx.aides
+    .filter((a) => a.absent || ctx.absentStaffIds.has(a.id))
+    .map((a) => a.name);
+  if (absentNames.length > 0) notes.push(`Built without ${absentNames.join(', ')}`);
+
   return {
     ok: true,
     schedule: {
@@ -347,10 +572,19 @@ export function solveSchedule(data: AppData): SolveResult {
       score,
       generatedAt: new Date().toISOString(),
       notes,
+      absentStaffIds: ctx.aides.filter((a) => a.absent || ctx.absentStaffIds.has(a.id)).map((a) => a.id),
     },
   };
 }
 
-export function evaluateData(data: AppData, assignments: Assignment[] = data.schedule?.assignments ?? []): Conflict[] {
+export function evaluateData(
+  data: AppData,
+  assignments: Assignment[] = data.schedule?.assignments ?? [],
+): Conflict[] {
   return evaluateAssignments(makeContext(data), assignments);
+}
+
+/** Staff whose absence the user may want a backup plan for. */
+export function coverableStaff(data: AppData): Aide[] {
+  return data.aides.filter((a) => a.countsAsCoverage && !isTeacher(a));
 }

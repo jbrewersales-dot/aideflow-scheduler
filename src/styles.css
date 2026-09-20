@@ -246,3 +246,41 @@ textarea { min-height: 92px; resize: vertical; }
   animation: spin 0.8s linear infinite;
 }
 @keyframes spin { to { transform: rotate(360deg); } }
+
+/* ---- Staff, rooms, per-student day planning ---- */
+.logo { object-fit: cover; border-radius: 12px; }
+.pill {
+  display: inline-block; font-size: 0.72rem; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.05em; padding: 3px 8px; border-radius: 999px;
+  background: var(--sage-soft); color: var(--sage-dark); vertical-align: middle; margin-left: 6px;
+}
+.pill-warn { background: var(--gold-soft); color: #7a5c14; }
+.card-muted { opacity: 0.6; }
+
+.subnav { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px; }
+.subnav button {
+  border: 1px solid var(--line); background: var(--card); border-radius: 999px;
+  padding: 7px 14px; font: inherit; font-size: 0.95rem; cursor: pointer; min-height: 40px;
+}
+.subnav button.active { background: var(--sage); border-color: var(--sage); color: white; font-weight: 700; }
+
+.plan-table { min-width: 940px; }
+.plan-table td { vertical-align: top; }
+.plan-table select, .plan-table input[type='text'] { width: 100%; min-width: 120px; }
+.plan-table .checkbox { justify-content: center; }
+.row-off { opacity: 0.45; }
+.row-off:hover { opacity: 1; }
+
+.chip-text { display: flex; flex-direction: column; line-height: 1.25; }
+.chip-detail { font-size: 0.78rem; color: var(--muted); font-weight: 400; }
+.strip-block.away { border-color: var(--clay); background: var(--gold-soft); }
+.strip-note { font-style: italic; }
+.cell-changed { background: var(--gold-soft); }
+
+@media print {
+  .print-sheet { break-inside: avoid; page-break-inside: avoid; margin-bottom: 18px; }
+  .subnav, .no-print { display: none !important; }
+}
+
+/* The per-student day planner needs room for six columns. */
+.modal-wide { width: min(1180px, 100%); }

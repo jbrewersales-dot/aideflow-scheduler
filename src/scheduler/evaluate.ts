@@ -1,8 +1,12 @@
 import {
   aideAvailableForBlock,
   blocksOverlap,
+  isTeacher,
+  locationName,
   studentAttendsBlock,
+  studentLocationId,
   studentNeedsCoverage,
+  studentNeedsEscort,
   studentRequiresOneToOne,
 } from '../domain';
 import type {
@@ -12,6 +16,7 @@ import type {
   Conflict,
   ConflictSeverity,
   ScheduleBlock,
+  SchoolLocation,
   Student,
   TraitConflictRule,
 } from '../types';
@@ -20,26 +25,58 @@ export interface EvalContext {
   students: Student[];
   aides: Aide[];
   blocks: ScheduleBlock[];
+  locations: SchoolLocation[];
   keepApart: AppData['keepApart'];
   traitConflicts: TraitConflictRule[];
   params: AppData['params'];
   studentById: Map<string, Student>;
   aideById: Map<string, Aide>;
   blockById: Map<string, ScheduleBlock>;
+  /** Staff treated as out for this solve, on top of each aide's own flag. */
+  absentStaffIds: Set<string>;
+  /** Memoised "which room is this student in for this block" lookups. */
+  locationCache: Map<string, string>;
 }
 
-export function makeContext(data: Pick<AppData, 'students' | 'aides' | 'blocks' | 'keepApart' | 'traitConflicts' | 'params'>): EvalContext {
+type ContextInput = Pick<
+  AppData,
+  'students' | 'aides' | 'blocks' | 'keepApart' | 'traitConflicts' | 'params'
+> & { locations?: SchoolLocation[] };
+
+export function makeContext(data: ContextInput, absentStaffIds: string[] = []): EvalContext {
   return {
     students: data.students,
     aides: data.aides,
     blocks: data.blocks,
+    locations: data.locations ?? [],
     keepApart: data.keepApart,
     traitConflicts: data.traitConflicts,
     params: data.params,
     studentById: new Map(data.students.map((s) => [s.id, s])),
     aideById: new Map(data.aides.map((a) => [a.id, a])),
     blockById: new Map(data.blocks.map((b) => [b.id, b])),
+    absentStaffIds: new Set(absentStaffIds),
+    locationCache: new Map(),
   };
+}
+
+/** Room lookup on the hot path of the search, cached per student and block. */
+export function locationOf(ctx: EvalContext, student: Student, blockId: string): string {
+  const key = `${blockId}::${student.id}`;
+  const hit = ctx.locationCache.get(key);
+  if (hit !== undefined) return hit;
+  const value = studentLocationId(student, blockId, ctx.locations);
+  ctx.locationCache.set(key, value);
+  return value;
+}
+
+export function staffIsOut(ctx: EvalContext, aide: Aide): boolean {
+  return aide.absent || ctx.absentStaffIds.has(aide.id);
+}
+
+/** Staff who may take assignments at all today. */
+export function assignableStaff(ctx: EvalContext): Aide[] {
+  return ctx.aides.filter((a) => a.countsAsCoverage && !staffIsOut(ctx, a));
 }
 
 function ruleSeverity(ctx: EvalContext, rule: TraitConflictRule): ConflictSeverity {
@@ -57,8 +94,10 @@ export function pairMatchesTraitRule(aTraits: string[], bTraits: string[], rule:
   );
 }
 
+/** How many students this staff member may hold at once in one block. */
 export function effectiveCap(aide: Aide, params: AppData['params']): number {
-  return Math.max(1, Math.min(aide.maxCaseload, params.maxStudentsPerAide, params.maxGroupSize));
+  const roleCap = isTeacher(aide) ? params.maxStudentsPerTeacher : params.maxStudentsPerAide;
+  return Math.max(1, Math.min(aide.maxCaseload, roleCap, params.maxGroupSize));
 }
 
 /**
@@ -72,6 +111,28 @@ export function wouldViolateHard(
   aide: Aide,
   assigned: Map<string, string>,
 ): Conflict | null {
+  if (staffIsOut(ctx, aide)) {
+    return {
+      kind: 'staff-absent',
+      severity: 'hard',
+      blockId: block.id,
+      studentIds: [student.id],
+      aideId: aide.id,
+      message: `${aide.name} is marked out today and cannot cover ${student.name}.`,
+    };
+  }
+
+  if (!aide.countsAsCoverage) {
+    return {
+      kind: 'aide-unavailable',
+      severity: 'hard',
+      blockId: block.id,
+      studentIds: [student.id],
+      aideId: aide.id,
+      message: `${aide.name} is not set up to count as student coverage.`,
+    };
+  }
+
   if (!aideAvailableForBlock(aide, block.id)) {
     return {
       kind: 'aide-unavailable',
@@ -83,11 +144,42 @@ export function wouldViolateHard(
     };
   }
 
+  // Where this student has to be, and whether the staff member can go there.
+  const locId = locationOf(ctx, student, block.id);
+  const needsEscort = studentNeedsEscort(student, block.id);
+  const leavesHome = Boolean(aide.homeLocationId) && locId !== aide.homeLocationId;
+
+  if (!aide.canLeaveRoom && (leavesHome || needsEscort)) {
+    return {
+      kind: 'cannot-leave-room',
+      severity: 'hard',
+      blockId: block.id,
+      studentIds: [student.id],
+      aideId: aide.id,
+      message: `${student.name} is in ${locationName(ctx.locations, locId)} for ${block.name}, but ${aide.name} cannot leave ${locationName(ctx.locations, aide.homeLocationId)}.`,
+    };
+  }
+
   const peers: Student[] = [];
   for (const [sid, aid] of assigned) {
     if (aid === aide.id) {
       const peer = ctx.studentById.get(sid);
       if (peer) peers.push(peer);
+    }
+  }
+
+  // One adult cannot be in two rooms at once.
+  for (const peer of peers) {
+    const peerLoc = locationOf(ctx, peer, block.id);
+    if (peerLoc !== locId) {
+      return {
+        kind: 'location-split',
+        severity: 'hard',
+        blockId: block.id,
+        studentIds: [student.id, peer.id],
+        aideId: aide.id,
+        message: `${aide.name} cannot be in two places during ${block.name}: ${student.name} is in ${locationName(ctx.locations, locId)} and ${peer.name} is in ${locationName(ctx.locations, peerLoc)}.`,
+      };
     }
   }
 
@@ -127,10 +219,6 @@ export function wouldViolateHard(
         message: `${peer.name} requires 1:1 and cannot share ${aide.name} with ${student.name} during ${block.name}.`,
       };
     }
-  }
-
-  if (ctx.params.elopesRequiresOneToOne && student.traits.includes('elopes') && !studentOneToOne) {
-    // covered by studentRequiresOneToOne when the flag is on
   }
 
   for (const pair of ctx.keepApart) {
@@ -193,7 +281,7 @@ export function evaluateAssignments(ctx: EvalContext, assignments: Assignment[])
         blockId: a.blockId,
         studentIds: [a.studentId],
         aideId: a.aideId,
-        message: `Assignment refers to an unknown aide.`,
+        message: `Assignment refers to an unknown staff member.`,
       });
       continue;
     }
@@ -224,7 +312,7 @@ export function evaluateAssignments(ctx: EvalContext, assignments: Assignment[])
           severity: 'hard',
           blockId: block.id,
           studentIds: [student.id],
-          message: `${student.name} must have an aide during ${block.name}, but is unassigned.`,
+          message: `${student.name} must have an adult during ${block.name}, but is unassigned.`,
         });
       }
     }
@@ -295,7 +383,7 @@ export function evaluateAssignments(ctx: EvalContext, assignments: Assignment[])
                 studentIds: [group[i].id, group[j].id],
                 aideId,
                 ruleId: rule.id,
-                message: `Soft trait preference: ${group[i].name} and ${group[j].name} (“${rule.traitA}” / “${rule.traitB}”) share an aide in ${block.name}.`,
+                message: `Soft trait preference: ${group[i].name} and ${group[j].name} (“${rule.traitA}” / “${rule.traitB}”) share an adult in ${block.name}.`,
               });
             }
           }
@@ -304,7 +392,7 @@ export function evaluateAssignments(ctx: EvalContext, assignments: Assignment[])
     }
   }
 
-  // Aide cannot serve two overlapping blocks
+  // Staff cannot serve two overlapping blocks
   const aideBlocks = new Map<string, Set<string>>();
   for (const a of assignments) {
     const set = aideBlocks.get(a.aideId) ?? new Set();
@@ -325,7 +413,7 @@ export function evaluateAssignments(ctx: EvalContext, assignments: Assignment[])
             severity: 'hard',
             studentIds,
             aideId,
-            message: `${aide?.name ?? 'Aide'} is double-booked in overlapping blocks ${list[i].name} and ${list[j].name}.`,
+            message: `${aide?.name ?? 'Staff member'} is double-booked in overlapping blocks ${list[i].name} and ${list[j].name}.`,
           });
         }
       }

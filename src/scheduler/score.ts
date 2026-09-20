@@ -1,4 +1,4 @@
-import { studentAttendsBlock } from '../domain';
+import { isTeacher, studentAttendsBlock, studentLocationId } from '../domain';
 import type { Assignment, ScheduleBlock } from '../types';
 import type { EvalContext } from './evaluate';
 
@@ -8,6 +8,7 @@ export function scoreAssignments(ctx: EvalContext, assignments: Assignment[]): {
   let trained = 0;
   let transitionsKept = 0;
   let transitionsTotal = 0;
+  let teacherHeld = 0;
 
   const byStudent = new Map<string, Assignment[]>();
   for (const a of assignments) {
@@ -31,6 +32,11 @@ export function scoreAssignments(ctx: EvalContext, assignments: Assignment[]): {
         trained += 1;
         break;
       }
+    }
+    // A student already in the teacher's room is cheapest to keep with the teacher,
+    // which leaves aides free for students who leave the room.
+    if (isTeacher(aide) && studentLocationId(student, a.blockId, ctx.locations) === aide.homeLocationId) {
+      teacherHeld += 1;
     }
   }
 
@@ -67,16 +73,17 @@ export function scoreAssignments(ctx: EvalContext, assignments: Assignment[]): {
   const score =
     preferred * w.preferredMatch +
     trained * w.trainedTagMatch +
-    transitionsKept * w.minimizeTransitions -
+    transitionsKept * w.minimizeTransitions +
+    teacherHeld * w.keepWithTeacher -
     variance * w.caseloadBalance;
 
   const notes: string[] = [];
-  notes.push(`Preferred aide–student matches: ${preferred}`);
+  notes.push(`Preferred adult–student matches: ${preferred}`);
   notes.push(`Trained-tag matches: ${trained}`);
   if (transitionsTotal > 0) {
-    notes.push(`Same-aide transitions kept: ${transitionsKept}/${transitionsTotal}`);
+    notes.push(`Same-adult transitions kept: ${transitionsKept}/${transitionsTotal}`);
   }
-  notes.push(`Caseload size variance: ${variance.toFixed(2)}`);
+  notes.push(`Group size variance: ${variance.toFixed(2)}`);
 
   return { score, notes };
 }

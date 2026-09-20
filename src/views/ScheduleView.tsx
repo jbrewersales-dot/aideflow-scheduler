@@ -1,7 +1,17 @@
 import { DndContext, PointerSensor, useDraggable, useDroppable, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { CSS } from '@dnd-kit/utilities';
 import { useMemo, useState } from 'react';
-import { formatTimeRange, sortBlocks, studentAttendsBlock, studentNeedsCoverage, studentRequiresOneToOne } from '../domain';
+import {
+  formatClockRange,
+  locationName,
+  sortBlocks,
+  studentActivity,
+  studentAttendsBlock,
+  studentLocationId,
+  studentNeedsCoverage,
+  studentNeedsEscort,
+  studentRequiresOneToOne,
+} from '../domain';
 import type { Assignment } from '../types';
 import { Banner } from '../ui';
 import { useStore } from '../state';
@@ -68,7 +78,8 @@ export function ScheduleView() {
       )}
 
       <p className="lede no-print">
-        Drag a name onto another aide in the same row. On a tablet, tap a name and choose an aide. Red chips break a hard rule.
+        Drag a name onto another adult in the same row. On a tablet, tap a name and press <strong>Move</strong>. Red
+        chips break a hard rule. ↗ means that adult leaves the classroom with the student.
       </p>
 
       <DndContext sensors={sensors} onDragEnd={onDragEnd}>
@@ -97,11 +108,24 @@ export function ScheduleView() {
                 const missing = present.filter(
                   (s) => studentNeedsCoverage(s, block, data.blocks) && !assignedIds.has(s.id),
                 );
+                const defaultRoom = data.locations[0]?.id ?? '';
+                const offsite = present.filter(
+                  (s) => studentLocationId(s, block.id, data.locations) !== defaultRoom,
+                );
                 return (
                   <tr key={block.id}>
                     <td className="sticky">
                       <strong>{block.name}</strong>
-                      <span className="time-cell">{formatTimeRange(block)}</span>
+                      <span className="time-cell">{formatClockRange(block)}</span>
+                      {offsite.length > 0 ? (
+                        <div className="meta">
+                          {offsite.map((s) => (
+                            <div key={s.id}>
+                              {s.name} → {locationName(data.locations, studentLocationId(s, block.id, data.locations))}
+                            </div>
+                          ))}
+                        </div>
+                      ) : null}
                       {missing.length > 0 ? (
                         <div className="unassigned">Needs coverage: {missing.map((s) => s.name).join(', ')}</div>
                       ) : null}
@@ -110,6 +134,7 @@ export function ScheduleView() {
                       <AideCell
                         key={aide.id}
                         blockId={block.id}
+                        blockName={block.name}
                         aideId={aide.id}
                         assignments={byAide.get(aide.id) ?? []}
                         conflictKeys={conflictKeys}
@@ -137,7 +162,7 @@ export function ScheduleView() {
         <div className="modal-back" onClick={() => setPick(null)} role="presentation">
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <h3>Move {data.students.find((s) => s.id === pick.studentId)?.name}</h3>
-            <p className="meta">Choose an aide for this block.</p>
+            <p className="meta">Choose an adult for this block.</p>
             <div className="row-actions">
               {data.aides.map((a) => (
                 <button
@@ -168,6 +193,7 @@ export function ScheduleView() {
 
 function AideCell({
   blockId,
+  blockName,
   aideId,
   assignments,
   conflictKeys,
@@ -175,6 +201,7 @@ function AideCell({
   oneToOneIds,
 }: {
   blockId: string;
+  blockName: string;
   aideId: string;
   assignments: Assignment[];
   conflictKeys: Set<string>;
@@ -188,12 +215,17 @@ function AideCell({
       {assignments.map((a) => {
         const student = data.students.find((s) => s.id === a.studentId);
         if (!student) return null;
+        const block = data.blocks.find((b) => b.id === blockId);
+        const roomId = studentLocationId(student, blockId, data.locations);
+        const away = roomId !== (data.locations[0]?.id ?? '');
         return (
           <StudentChip
             key={a.studentId}
             blockId={blockId}
             studentId={a.studentId}
             name={student.name}
+            detail={away ? locationName(data.locations, roomId) : block ? studentActivity(student, block) === blockName ? '' : studentActivity(student, block) : ''}
+            escort={studentNeedsEscort(student, blockId)}
             conflict={conflictKeys.has(`${blockId}::${a.studentId}`)}
             oneToOne={oneToOneIds.has(a.studentId)}
             onPick={() => onPick(a.studentId)}
@@ -208,6 +240,8 @@ function StudentChip({
   blockId,
   studentId,
   name,
+  detail,
+  escort,
   conflict,
   oneToOne,
   onPick,
@@ -215,6 +249,8 @@ function StudentChip({
   blockId: string;
   studentId: string;
   name: string;
+  detail: string;
+  escort: boolean;
   conflict: boolean;
   oneToOne: boolean;
   onPick: () => void;
@@ -234,7 +270,11 @@ function StudentChip({
       {...listeners}
       {...attributes}
     >
-      <span>{name}</span>
+      <span className="chip-text">
+        {name}
+        {escort ? ' ↗' : ''}
+        {detail ? <span className="chip-detail">{detail}</span> : null}
+      </span>
       <button type="button" className="btn btn-ghost btn-small" onClick={onPick} aria-label={`Move ${name}`}>
         Move
       </button>
