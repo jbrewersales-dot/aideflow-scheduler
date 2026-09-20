@@ -27,20 +27,12 @@ Your data stays inside the app on that computer.
 
 ### 2. Web version (nothing to install)
 
-**This repository is private, and GitHub Pages is only available on a private
-repository for paid accounts.** The Pages workflow therefore builds and tests
-the app but skips publishing, and says so in its log rather than failing. You do
-not need it — the desktop app above is the same program.
+Every push to `main` publishes the app to GitHub Pages. The address is shown
+under **Settings → Pages**, and also on the **Deploy to GitHub Pages** run in
+the Actions tab. Open it in Chrome, Edge or Safari.
 
-To turn the web version on later, either make the repository public or upgrade
-the account, then:
-
-1. Open the repository on github.com and click **Settings**.
-2. Click **Pages** in the left sidebar.
-3. Under **Build and deployment**, set **Source** to **GitHub Actions**.
-4. Open **Actions → Deploy to GitHub Pages → Run workflow**.
-
-The address then appears under Settings → Pages.
+Your classroom data stays in that browser. Nothing is uploaded, and the web
+address contains no student information.
 
 ### 3. Run from source
 
@@ -232,11 +224,14 @@ You can also edit all of this by hand on the **Students** tab.
 
 ## Privacy
 
-- Data is stored in this browser’s `localStorage` only.
-- Use **Data → Export JSON backup** before clearing the browser or switching computers.
-- Do not put this file on a shared public drive if it contains real student names.
-
----
+- Student information lives only in this browser (or inside the desktop app) on
+  the computer you are using. It is never uploaded, and there is no account.
+- **This repository is public.** The code and the fictional sample classroom are
+  visible to anyone. Real student data is never part of it.
+- Use **Data → Export JSON backup** before clearing the browser or moving to a
+  new computer. Keep that file somewhere private — it does contain real names.
+  `.gitignore` is set up so an exported backup or schedule saved into this
+  folder cannot be committed by accident.
 
 ## Tests
 
