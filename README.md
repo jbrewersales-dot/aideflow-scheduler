@@ -27,16 +27,20 @@ Your data stays inside the app on that computer.
 
 ### 2. Web version (nothing to install)
 
-Every push to `main` publishes the app to GitHub Pages. This needs to be switched
-on once, by an owner of the repository:
+**This repository is private, and GitHub Pages is only available on a private
+repository for paid accounts.** The Pages workflow therefore builds and tests
+the app but skips publishing, and says so in its log rather than failing. You do
+not need it — the desktop app above is the same program.
+
+To turn the web version on later, either make the repository public or upgrade
+the account, then:
 
 1. Open the repository on github.com and click **Settings**.
 2. Click **Pages** in the left sidebar.
 3. Under **Build and deployment**, set **Source** to **GitHub Actions**.
+4. Open **Actions → Deploy to GitHub Pages → Run workflow**.
 
-After that, open **Actions → Deploy to GitHub Pages → Run workflow**. When it
-finishes, the address appears under Settings → Pages. Open it in Chrome, Edge or
-Safari. Your data stays in that browser.
+The address then appears under Settings → Pages.
 
 ### 3. Run from source
 

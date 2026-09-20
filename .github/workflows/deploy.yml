@@ -1,5 +1,15 @@
 name: Deploy to GitHub Pages
 
+# Publishes the web version of AideFlow.
+#
+# GitHub Pages is only available on a private repository for paid accounts, so
+# this workflow treats "Pages is not available" as a skip, not a failure. The
+# app is still built and tested here either way, and the desktop installers in
+# "Build desktop installers" are completely independent of this.
+#
+# To turn the web version on later: make the repository public, or upgrade the
+# account, then set Settings -> Pages -> Source to "GitHub Actions".
+
 on:
   push:
     branches: [main]
@@ -17,6 +27,8 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    outputs:
+      pages_ready: ${{ steps.pages.outcome == 'success' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -26,24 +38,29 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
+
       - id: pages
         uses: actions/configure-pages@v5
         with:
           enablement: true
-        # Turning Pages on from a workflow needs a repository setting that only
-        # an owner can change, so explain that rather than failing cryptically.
+        # Creating the Pages site needs a setting the workflow cannot change,
+        # and on a private repository it needs a paid plan. Neither is a broken
+        # build, so carry on instead of failing the run.
         continue-on-error: true
-      - name: Check that GitHub Pages is switched on
-        if: steps.pages.outcome == 'failure'
+
+      - name: Explain that the web version was skipped
+        if: steps.pages.outcome != 'success'
         run: |
-          echo "::error title=GitHub Pages is not switched on::Open the repository on github.com, go to Settings then Pages, and under 'Build and deployment' set Source to 'GitHub Actions'. Then re-run this workflow. The desktop installers are unaffected."
-          exit 1
+          echo "::notice title=Web version skipped::GitHub Pages is not available for this repository, so the web version was not published. The app itself built and tested fine, and the desktop installers are unaffected. To enable it, make the repository public (or upgrade the account), then set Settings > Pages > Source to 'GitHub Actions'."
+
       - uses: actions/upload-pages-artifact@v3
+        if: steps.pages.outcome == 'success'
         with:
           path: dist
 
   deploy:
     needs: build
+    if: needs.build.outputs.pages_ready == 'true'
     runs-on: ubuntu-latest
     environment:
       name: github-pages
