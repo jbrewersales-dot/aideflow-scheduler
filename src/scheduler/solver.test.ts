@@ -41,7 +41,7 @@ function student(partial: Partial<Student> & Pick<Student, 'id' | 'name'>): Stud
 
 function world(overrides: Partial<AppData> = {}): AppData {
   const blocks = overrides.blocks ?? [
-    { id: 'p1', name: 'Period 1', startTime: '08:00', endTime: '09:00', kind: 'period', appliesTo: 'all' } satisfies ScheduleBlock,
+    { id: 'p1', name: 'Period 1', startTime: '08:00', endTime: '09:00', kind: 'period', appliesTo: 'all', studentIds: [] } satisfies ScheduleBlock,
   ];
   return {
     version: 2,
@@ -162,8 +162,8 @@ describe('solveSchedule', () => {
 
   it('never double-books an adult across overlapping blocks', () => {
     const blocks: ScheduleBlock[] = [
-      { id: 'lunch', name: 'Lunch', startTime: '11:30', endTime: '12:15', kind: 'lunch', appliesTo: 'all' },
-      { id: 'duty', name: 'Hall duty', startTime: '12:00', endTime: '12:30', kind: 'other', appliesTo: 'all' },
+      { id: 'lunch', name: 'Lunch', startTime: '11:30', endTime: '12:15', kind: 'lunch', appliesTo: 'all', studentIds: [] },
+      { id: 'duty', name: 'Hall duty', startTime: '12:00', endTime: '12:30', kind: 'other', appliesTo: 'all', studentIds: [] },
     ];
     const data = world({
       blocks,
@@ -179,8 +179,8 @@ describe('solveSchedule', () => {
 
   it('solves overlapping blocks together when enough adults exist', () => {
     const blocks: ScheduleBlock[] = [
-      { id: 'lunch', name: 'Lunch', startTime: '11:30', endTime: '12:15', kind: 'lunch', appliesTo: 'all' },
-      { id: 'duty', name: 'Hall duty', startTime: '12:00', endTime: '12:30', kind: 'other', appliesTo: 'all' },
+      { id: 'lunch', name: 'Lunch', startTime: '11:30', endTime: '12:15', kind: 'lunch', appliesTo: 'all', studentIds: [] },
+      { id: 'duty', name: 'Hall duty', startTime: '12:00', endTime: '12:30', kind: 'other', appliesTo: 'all', studentIds: [] },
     ];
     const data = world({
       blocks,
@@ -204,8 +204,8 @@ describe('solveSchedule', () => {
     const data = world({
       aides: [aide({ id: 'a1', name: 'Morning only', availableBlockIds: ['p1'] })],
       blocks: [
-        { id: 'p1', name: 'Period 1', startTime: '08:00', endTime: '09:00', kind: 'period', appliesTo: 'all' },
-        { id: 'p2', name: 'Period 2', startTime: '09:00', endTime: '10:00', kind: 'period', appliesTo: 'all' },
+        { id: 'p1', name: 'Period 1', startTime: '08:00', endTime: '09:00', kind: 'period', appliesTo: 'all', studentIds: [] },
+        { id: 'p2', name: 'Period 2', startTime: '09:00', endTime: '10:00', kind: 'period', appliesTo: 'all', studentIds: [] },
       ],
       students: [student({ id: 's1', name: 'Avery' })],
     });
@@ -382,6 +382,68 @@ describe('who is here, and when', () => {
     );
     expect(dylanBlocks.has('blk_p1')).toBe(false);
     expect(dylanBlocks.has('blk_p5')).toBe(true);
+  });
+});
+
+describe('picking exactly who is in a block', () => {
+  const block = (over: Partial<ScheduleBlock> = {}): ScheduleBlock => ({
+    id: 'p1', name: 'Period 1', startTime: '08:00', endTime: '09:00',
+    kind: 'period', appliesTo: 'all', studentIds: [], ...over,
+  });
+
+  it('only the ticked students are in the block', () => {
+    const b = block({ appliesTo: 'listed', studentIds: ['s1', 's3'] });
+    const roster = [
+      student({ id: 's1', name: 'One' }),
+      student({ id: 's2', name: 'Two' }),
+      student({ id: 's3', name: 'Three', dayType: 'shortened' }),
+    ];
+    expect(roster.map((s) => studentAttendsBlock(s, b, [b]))).toEqual([true, false, true]);
+  });
+
+  it('a mix of full-day and shortened-day students can share one block', () => {
+    const b = block({ appliesTo: 'listed', studentIds: ['full1', 'short1'] });
+    const full = student({ id: 'full1', name: 'Full', dayType: 'full' });
+    const short = student({ id: 'short1', name: 'Short', dayType: 'shortened' });
+    expect(studentAttendsBlock(full, b, [b])).toBe(true);
+    expect(studentAttendsBlock(short, b, [b])).toBe(true);
+  });
+
+  it('ticking nobody means the block has no students', () => {
+    const b = block({ appliesTo: 'listed', studentIds: [] });
+    const s = student({ id: 's1', name: 'One' });
+    expect(studentAttendsBlock(s, b, [b])).toBe(false);
+  });
+
+  it("a student's own plan row still overrides the block's list", () => {
+    const b = block({ appliesTo: 'listed', studentIds: ['s1'] });
+    const optedOut = student({ id: 's1', name: 'One', plan: [planRow('p1', { attends: false })] });
+    const optedIn = student({ id: 's2', name: 'Two', plan: [planRow('p1', { attends: true })] });
+    expect(studentAttendsBlock(optedOut, b, [b])).toBe(false);
+    expect(studentAttendsBlock(optedIn, b, [b])).toBe(true);
+  });
+
+  it('schedules only the ticked students', () => {
+    const data = world({
+      blocks: [block({ appliesTo: 'listed', studentIds: ['s1'] })],
+      aides: [aide({ id: 'a1', name: 'Pat' })],
+      students: [student({ id: 's1', name: 'In' }), student({ id: 's2', name: 'Out' })],
+    });
+    const result = solveSchedule(data);
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('expected success');
+    expect(result.schedule.assignments.map((a) => a.studentId)).toEqual(['s1']);
+  });
+
+  it('removing a student takes them off every block list', () => {
+    const before = migrate({
+      version: 2, teacherName: 'A', schoolName: '', students: [], aides: [],
+      blocks: [{ id: 'p1', name: 'P1', startTime: '08:00', endTime: '09:00', kind: 'period',
+        appliesTo: 'listed', studentIds: ['s1', 's2'] }],
+      keepApart: [], traitConflicts: [], params: {},
+    });
+    expect(before.blocks[0].studentIds).toEqual(['s1', 's2']);
+    expect(before.blocks[0].appliesTo).toBe('listed');
   });
 });
 

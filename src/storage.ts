@@ -38,6 +38,20 @@ function migrateAide(raw: UnknownRecord, index: number): Aide {
   };
 }
 
+function migrateBlock(raw: UnknownRecord, index: number): AppData['blocks'][number] {
+  const applies = raw.appliesTo;
+  return {
+    id: typeof raw.id === 'string' ? raw.id : `blk_${index}`,
+    name: typeof raw.name === 'string' ? raw.name : `Block ${index + 1}`,
+    startTime: typeof raw.startTime === 'string' ? raw.startTime : '08:00',
+    endTime: typeof raw.endTime === 'string' ? raw.endTime : '08:45',
+    kind: (typeof raw.kind === 'string' ? raw.kind : 'period') as AppData['blocks'][number]['kind'],
+    appliesTo:
+      applies === 'full' || applies === 'shortened' || applies === 'listed' ? applies : 'all',
+    studentIds: Array.isArray(raw.studentIds) ? (raw.studentIds as string[]) : [],
+  };
+}
+
 function migrateStudent(raw: UnknownRecord, index: number): Student {
   const coverageRaw = raw.coverageMode;
   const coverageMode = coverageRaw === 'listed' || coverageRaw === 'none' ? coverageRaw : 'always';
@@ -103,7 +117,7 @@ export function migrate(raw: unknown): AppData {
     schoolName: typeof raw.schoolName === 'string' ? raw.schoolName : '',
     students: (raw.students as UnknownRecord[]).map(migrateStudent),
     aides,
-    blocks: raw.blocks as AppData['blocks'],
+    blocks: (raw.blocks as UnknownRecord[]).map(migrateBlock),
     locations,
     keepApart: raw.keepApart as AppData['keepApart'],
     traitConflicts: raw.traitConflicts as AppData['traitConflicts'],

@@ -90,6 +90,10 @@ function reducer(state: AppData, action: Action): AppData {
         ...state,
         students: state.students.filter((s) => s.id !== action.id),
         keepApart: state.keepApart.filter((p) => p.studentAId !== action.id && p.studentBId !== action.id),
+        blocks: state.blocks.map((b) => ({
+          ...b,
+          studentIds: b.studentIds.filter((id) => id !== action.id),
+        })),
         aides: state.aides.map((a) => ({
           ...a,
           preferredStudentIds: a.preferredStudentIds.filter((id) => id !== action.id),
@@ -321,5 +325,6 @@ export function blankBlock(): ScheduleBlock {
     endTime: '08:45',
     kind: 'period',
     appliesTo: 'all',
+    studentIds: [],
   };
 }

@@ -10,7 +10,12 @@ export type BlockKind =
   | 'specials'
   | 'other';
 
-export type AppliesTo = 'all' | 'full' | 'shortened';
+/**
+ * Who is in a block. 'listed' means exactly the students named on the block,
+ * which is the only honest answer when a block is neither "all full-day" nor
+ * "all shortened-day" students.
+ */
+export type AppliesTo = 'all' | 'full' | 'shortened' | 'listed';
 
 export type CoverageMode = 'always' | 'listed' | 'none';
 
@@ -44,6 +49,8 @@ export interface ScheduleBlock {
   endTime: string;
   kind: BlockKind;
   appliesTo: AppliesTo;
+  /** Used when appliesTo is 'listed'. Empty means nobody is in this block. */
+  studentIds: string[];
 }
 
 export interface SchoolLocation {

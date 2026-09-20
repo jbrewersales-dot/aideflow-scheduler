@@ -42,13 +42,16 @@ export function planFor(student: Student, blockId: string): StudentBlockPlan | u
 /**
  * Attendance is decided student-first, in this order:
  *   1. an explicit yes/no on that student's own plan row,
- *   2. the student's arrival / departure window,
- *   3. an explicit list of blocks on the student,
- *   4. the full-day / shortened-day pattern of the block.
+ *   2. a block that names its students explicitly,
+ *   3. the student's arrival / departure window,
+ *   4. an explicit list of blocks on the student,
+ *   5. the full-day / shortened-day pattern of the block.
  */
 export function studentAttendsBlock(student: Student, block: ScheduleBlock, allBlocks: ScheduleBlock[]): boolean {
   const row = planFor(student, block.id);
   if (row && row.attends !== null) return row.attends;
+
+  if (block.appliesTo === 'listed') return block.studentIds.includes(student.id);
 
   const start = timeToMinutes(block.startTime);
   const end = timeToMinutes(block.endTime);
