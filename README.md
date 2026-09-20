@@ -27,7 +27,16 @@ Your data stays inside the app on that computer.
 
 ### 2. Web version (nothing to install)
 
-Every push to `main` publishes the app to GitHub Pages. Once Pages is enabled for the repo, the address is shown under **Settings → Pages**. Open it in Chrome, Edge or Safari. Your data stays in that browser.
+Every push to `main` publishes the app to GitHub Pages. This needs to be switched
+on once, by an owner of the repository:
+
+1. Open the repository on github.com and click **Settings**.
+2. Click **Pages** in the left sidebar.
+3. Under **Build and deployment**, set **Source** to **GitHub Actions**.
+
+After that, open **Actions → Deploy to GitHub Pages → Run workflow**. When it
+finishes, the address appears under Settings → Pages. Open it in Chrome, Edge or
+Safari. Your data stays in that browser.
 
 ### 3. Run from source
 
