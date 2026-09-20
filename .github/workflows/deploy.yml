@@ -26,9 +26,18 @@ jobs:
       - run: npm ci
       - run: npm test
       - run: npm run build
-      - uses: actions/configure-pages@v5
+      - id: pages
+        uses: actions/configure-pages@v5
         with:
           enablement: true
+        # Turning Pages on from a workflow needs a repository setting that only
+        # an owner can change, so explain that rather than failing cryptically.
+        continue-on-error: true
+      - name: Check that GitHub Pages is switched on
+        if: steps.pages.outcome == 'failure'
+        run: |
+          echo "::error title=GitHub Pages is not switched on::Open the repository on github.com, go to Settings then Pages, and under 'Build and deployment' set Source to 'GitHub Actions'. Then re-run this workflow. The desktop installers are unaffected."
+          exit 1
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
