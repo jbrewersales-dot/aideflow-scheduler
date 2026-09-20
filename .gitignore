@@ -28,3 +28,13 @@ coverage
 
 # Desktop build output
 release/
+
+# Exported classroom data. AideFlow keeps student information on the device,
+# but a JSON backup or CSV export saved into this folder would contain real
+# names. Never commit those — this repository is public.
+aideflow-backup*.json
+aideflow-students*.csv
+aideflow-schedule*.csv
+aideflow-day-plan*.csv
+aideflow-staff-sheets*.csv
+!public/aideflow-students-template.csv
