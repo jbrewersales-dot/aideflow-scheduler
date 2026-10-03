@@ -10,10 +10,12 @@ import { ParamsView } from './views/ParamsView';
 import { PrintView } from './views/PrintView';
 import { RulesView } from './views/RulesView';
 import { ScheduleView } from './views/ScheduleView';
+import { SetupView } from './views/SetupView';
 import { StripsView } from './views/StripsView';
 import { StudentsView } from './views/StudentsView';
 
 const NAV: { id: AppView; label: string }[] = [
+  { id: 'setup', label: 'Set up' },
   { id: 'students', label: 'Students' },
   { id: 'schedule', label: 'Day grid' },
   { id: 'strips', label: 'Student days' },
@@ -71,6 +73,7 @@ export function App() {
         ))}
       </nav>
       <main className="page">
+        {view === 'setup' ? <SetupView /> : null}
         {view === 'schedule' ? <ScheduleView /> : null}
         {view === 'strips' ? <StripsView /> : null}
         {view === 'conflicts' ? <ConflictsView /> : null}

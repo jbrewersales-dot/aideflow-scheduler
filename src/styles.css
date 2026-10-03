@@ -300,3 +300,31 @@ textarea { min-height: 92px; resize: vertical; }
 .picker-row input { width: 22px; height: 22px; flex: none; }
 .picker-row .meta { display: block; }
 .warn-text { color: #7a5c14; }
+
+/* ---- Guided setup ---- */
+.stepper { display: flex; flex-wrap: wrap; gap: 8px; list-style: none; padding: 0; margin: 0 0 18px; }
+.step-pill {
+  display: flex; align-items: center; gap: 8px; min-height: var(--touch);
+  padding: 8px 16px 8px 8px; border: 1px solid var(--line); border-radius: 999px;
+  background: var(--card); font: inherit; cursor: pointer;
+}
+.step-pill .step-num {
+  display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%;
+  background: var(--paper-2); font-weight: 700; font-size: 0.85rem; flex: none;
+}
+.step-pill.active { background: var(--sage); border-color: var(--sage); color: white; font-weight: 700; }
+.step-pill.active .step-num { background: rgba(255,255,255,0.25); color: white; }
+.step-pill.done .step-num { background: var(--ok-soft); color: var(--ok); }
+
+.paste-box {
+  width: 100%; min-height: 180px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.92rem; line-height: 1.5; resize: vertical;
+}
+.preview-table { min-width: 0; width: 100%; }
+.preview-table th, .preview-table td { padding: 7px 10px; font-size: 0.93rem; }
+.preview-table th { position: static; }
+
+.trait-grid { display: grid; gap: 12px; max-height: 52vh; overflow: auto; }
+.trait-row { padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+.trait-row:last-child { border-bottom: 0; }
+.trait-name { margin-bottom: 6px; }
