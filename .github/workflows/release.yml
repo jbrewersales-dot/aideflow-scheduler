@@ -42,6 +42,23 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+
+      # The release tag is the single source of truth for the version number,
+      # so cutting a release never needs a version-bump commit first.
+      - name: Use the release tag as the version number
+        # Branch pushes build installers as a check and have no version tag,
+        # so only a real release rewrites the version.
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+        shell: bash
+        run: |
+          TAG="${{ github.event.inputs.tag || github.ref_name }}"
+          VERSION="${TAG#v}"
+          if ! printf '%s' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+([-.+][0-9A-Za-z.-]+)?$'; then
+            echo "::error title=Bad release tag::'$TAG' is not a version. Use a tag like v1.0.2."
+            exit 1
+          fi
+          node -e "const fs=require('fs');const f='package.json';const p=JSON.parse(fs.readFileSync(f,'utf8'));p.version=process.argv[1];fs.writeFileSync(f,JSON.stringify(p,null,2)+'\n');" "$VERSION"
+          echo "Building AideFlow $VERSION"
       - run: npm test
       - run: npm run build
       - run: npx electron-builder ${{ matrix.args }} --publish never
