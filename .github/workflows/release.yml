@@ -46,6 +46,9 @@ jobs:
       # The release tag is the single source of truth for the version number,
       # so cutting a release never needs a version-bump commit first.
       - name: Use the release tag as the version number
+        # Branch pushes build installers as a check and have no version tag,
+        # so only a real release rewrites the version.
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         shell: bash
         run: |
           TAG="${{ github.event.inputs.tag || github.ref_name }}"
