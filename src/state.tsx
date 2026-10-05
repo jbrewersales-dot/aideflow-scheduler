@@ -29,6 +29,7 @@ import type {
 } from './types';
 
 export type AppView =
+  | 'setup'
   | 'schedule'
   | 'students'
   | 'aides'
